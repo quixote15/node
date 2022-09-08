@@ -7,11 +7,8 @@
 
 #include "src/codegen/assembler-inl.h"
 #include "src/codegen/macro-assembler.h"
-#include "src/diagnostics/disassembler.h"
 #include "src/execution/simulator.h"
 #include "src/heap/factory.h"
-#include "src/init/v8.h"
-#include "src/utils/utils.h"
 #include "test/cctest/cctest.h"
 
 #define PRINT_RES(res, expected_res, in_hex)                         \
@@ -72,8 +69,8 @@ OUTPUT_T GenAndRunTest(INPUT_T input0, Func test_generator) {
 
   auto f = GeneratedCode<OINT_T(IINT_T)>::FromCode(*code);
 
-  auto res = f.Call(bit_cast<IINT_T>(input0));
-  return bit_cast<OUTPUT_T>(res);
+  auto res = f.Call(base::bit_cast<IINT_T>(input0));
+  return base::bit_cast<OUTPUT_T>(res);
 }
 
 template <typename OUTPUT_T, typename INPUT_T>
@@ -119,8 +116,9 @@ OUTPUT_T GenAndRunTest(INPUT_T input0, INPUT_T input1, Func test_generator) {
                                 int64_t>::type>::type;
   auto f = GeneratedCode<OINT_T(IINT_T, IINT_T)>::FromCode(*code);
 
-  auto res = f.Call(bit_cast<IINT_T>(input0), bit_cast<IINT_T>(input1));
-  return bit_cast<OUTPUT_T>(res);
+  auto res =
+      f.Call(base::bit_cast<IINT_T>(input0), base::bit_cast<IINT_T>(input1));
+  return base::bit_cast<OUTPUT_T>(res);
 }
 
 template <typename OUTPUT_T, typename INPUT_T>
@@ -169,9 +167,10 @@ OUTPUT_T GenAndRunTest(INPUT_T input0, INPUT_T input1, INPUT_T input2,
                                 int64_t>::type>::type;
   auto f = GeneratedCode<OINT_T(IINT_T, IINT_T, IINT_T)>::FromCode(*code);
 
-  auto res = f.Call(bit_cast<IINT_T>(input0), bit_cast<IINT_T>(input1),
-                    bit_cast<IINT_T>(input2));
-  return bit_cast<OUTPUT_T>(res);
+  auto res =
+      f.Call(base::bit_cast<IINT_T>(input0), base::bit_cast<IINT_T>(input1),
+             base::bit_cast<IINT_T>(input2));
+  return base::bit_cast<OUTPUT_T>(res);
 }
 
 template <typename T>
@@ -210,8 +209,8 @@ void GenAndRunTestForLoadStore(T value, Func test_generator) {
   auto f = GeneratedCode<INT_T(void* base, INT_T val)>::FromCode(*code);
 
   int64_t tmp = 0;
-  auto res = f.Call(&tmp, bit_cast<INT_T>(value));
-  CHECK_EQ(bit_cast<T>(res), value);
+  auto res = f.Call(&tmp, base::bit_cast<INT_T>(value));
+  CHECK_EQ(base::bit_cast<T>(res), value);
 }
 
 template <typename T, typename Func>
@@ -255,8 +254,8 @@ void GenAndRunTestForLRSC(T value, Func test_generator) {
 
   T tmp = 0;
   auto f = GeneratedCode<INT_T(void* base, INT_T val)>::FromCode(*code);
-  auto res = f.Call(&tmp, bit_cast<T>(value));
-  CHECK_EQ(bit_cast<T>(res), static_cast<T>(0));
+  auto res = f.Call(&tmp, base::bit_cast<T>(value));
+  CHECK_EQ(base::bit_cast<T>(res), static_cast<T>(0));
 }
 
 template <typename INPUT_T, typename OUTPUT_T, typename Func>
@@ -316,8 +315,9 @@ OUTPUT_T GenAndRunTestForAMO(INPUT_T input0, INPUT_T input1,
   OUTPUT_T tmp = 0;
   auto f =
       GeneratedCode<OUTPUT_T(void* base, INPUT_T, INPUT_T)>::FromCode(*code);
-  auto res = f.Call(&tmp, bit_cast<INPUT_T>(input0), bit_cast<INPUT_T>(input1));
-  return bit_cast<OUTPUT_T>(res);
+  auto res = f.Call(&tmp, base::bit_cast<INPUT_T>(input0),
+                    base::bit_cast<INPUT_T>(input1));
+  return base::bit_cast<OUTPUT_T>(res);
 }
 
 Handle<Code> AssembleCodeImpl(Func assemble);

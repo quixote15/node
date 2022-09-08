@@ -8,6 +8,7 @@
 #include "src/baseline/baseline-assembler.h"
 #include "src/codegen/interface-descriptors.h"
 #include "src/codegen/mips/assembler-mips-inl.h"
+#include "src/objects/literal-objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -60,7 +61,7 @@ enum class Condition : uint32_t {
 inline internal::Condition AsMasmCondition(Condition cond) {
   // This is important for arm, where the internal::Condition where each value
   // represents an encoded bit field value.
-  STATIC_ASSERT(sizeof(internal::Condition) == sizeof(Condition));
+  static_assert(sizeof(internal::Condition) == sizeof(Condition));
   return static_cast<internal::Condition>(cond);
 }
 
@@ -90,8 +91,6 @@ MemOperand BaselineAssembler::FeedbackVectorOperand() {
 }
 
 void BaselineAssembler::Bind(Label* label) { __ bind(label); }
-
-void BaselineAssembler::BindWithoutJumpTarget(Label* label) { __ bind(label); }
 
 void BaselineAssembler::JumpTarget() {
   // NOP.
@@ -163,7 +162,7 @@ void BaselineAssembler::JumpIfInstanceType(Condition cc, Register map,
                                            Label* target, Label::Distance) {
   ScratchRegisterScope temps(this);
   Register type = temps.AcquireScratch();
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     __ AssertNotSmi(map);
     __ GetObjectType(map, type, type);
     __ Assert(eq, AbortReason::kUnexpectedValue, type, Operand(MAP_TYPE));
@@ -357,6 +356,12 @@ void BaselineAssembler::LoadTaggedSignedField(Register output, Register source,
                                               int offset) {
   __ Lw(output, FieldMemOperand(source, offset));
 }
+void BaselineAssembler::LoadTaggedSignedFieldAndUntag(Register output,
+                                                      Register source,
+                                                      int offset) {
+  LoadTaggedSignedField(output, source, offset);
+  SmiUntag(output);
+}
 void BaselineAssembler::LoadTaggedAnyField(Register output, Register source,
                                            int offset) {
   __ Lw(output, FieldMemOperand(source, offset));
@@ -391,6 +396,30 @@ void BaselineAssembler::StoreTaggedFieldNoWriteBarrier(Register target,
                                                        int offset,
                                                        Register value) {
   __ Sw(value, FieldMemOperand(target, offset));
+}
+
+void BaselineAssembler::TryLoadOptimizedOsrCode(Register scratch_and_result,
+                                                Register feedback_vector,
+                                                FeedbackSlot slot,
+                                                Label* on_result,
+                                                Label::Distance) {
+  Label fallthrough;
+  LoadTaggedPointerField(scratch_and_result, feedback_vector,
+                         FeedbackVector::OffsetOfElementAt(slot.ToInt()));
+  __ LoadWeakValue(scratch_and_result, scratch_and_result, &fallthrough);
+  // Is it marked_for_deoptimization? If yes, clear the slot.
+  {
+    ScratchRegisterScope temps(this);
+    Register scratch = temps.AcquireScratch();
+    __ TestCodeTIsMarkedForDeoptimizationAndJump(scratch_and_result, scratch,
+                                                 eq, on_result);
+    __ li(scratch, __ ClearedValue());
+    StoreTaggedFieldNoWriteBarrier(
+        feedback_vector, FeedbackVector::OffsetOfElementAt(slot.ToInt()),
+        scratch);
+  }
+  __ bind(&fallthrough);
+  Move(scratch_and_result, 0);
 }
 
 void BaselineAssembler::AddToInterruptBudgetAndJumpIfNotExceeded(
@@ -430,6 +459,24 @@ void BaselineAssembler::AddToInterruptBudgetAndJumpIfNotExceeded(
         FieldMemOperand(feedback_cell, FeedbackCell::kInterruptBudgetOffset));
   if (skip_interrupt_label)
     __ Branch(skip_interrupt_label, ge, interrupt_budget, Operand(zero_reg));
+}
+
+void BaselineAssembler::LdaContextSlot(Register context, uint32_t index,
+                                       uint32_t depth) {
+  for (; depth > 0; --depth) {
+    LoadTaggedPointerField(context, context, Context::kPreviousOffset);
+  }
+  LoadTaggedAnyField(kInterpreterAccumulatorRegister, context,
+                     Context::OffsetOfElementAt(index));
+}
+
+void BaselineAssembler::StaContextSlot(Register context, Register value,
+                                       uint32_t index, uint32_t depth) {
+  for (; depth > 0; --depth) {
+    LoadTaggedPointerField(context, context, Context::kPreviousOffset);
+  }
+  StoreTaggedFieldWithWriteBarrier(context, Context::OffsetOfElementAt(index),
+                                   value);
 }
 
 void BaselineAssembler::AddSmi(Register lhs, Smi rhs) {
@@ -479,7 +526,7 @@ void BaselineAssembler::EmitReturn(MacroAssembler* masm) {
     __ LoadContext(kContextRegister);
     __ LoadFunction(kJSFunctionRegister);
     __ masm()->Push(kJSFunctionRegister);
-    __ CallRuntime(Runtime::kBytecodeBudgetInterrupt, 1);
+    __ CallRuntime(Runtime::kBytecodeBudgetInterrupt_Sparkplug, 1);
 
     __ masm()->Pop(params_size, kInterpreterAccumulatorRegister);
     __ masm()->SmiUntag(params_size);

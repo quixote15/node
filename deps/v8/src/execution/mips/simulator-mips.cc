@@ -15,8 +15,8 @@
 
 #include "src/base/bits.h"
 #include "src/base/lazy-instance.h"
+#include "src/base/platform/memory.h"
 #include "src/base/platform/platform.h"
-#include "src/base/platform/wrappers.h"
 #include "src/base/vector.h"
 #include "src/codegen/assembler-inl.h"
 #include "src/codegen/macro-assembler.h"
@@ -856,7 +856,7 @@ void Simulator::CheckICache(base::CustomMatcherHashMap* i_cache,
 Simulator::Simulator(Isolate* isolate) : isolate_(isolate) {
   // Set up simulator support first. Some of this information is needed to
   // setup the architecture state.
-  stack_size_ = FLAG_sim_stack_size * KB;
+  stack_size_ = v8_flags.sim_stack_size * KB;
   stack_ = reinterpret_cast<char*>(base::Malloc(stack_size_));
   pc_modified_ = false;
   icount_ = 0;
@@ -955,16 +955,16 @@ void Simulator::set_fpu_register_hi_word(int fpureg, int32_t value) {
 
 void Simulator::set_fpu_register_float(int fpureg, float value) {
   DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-  *bit_cast<float*>(&FPUregisters_[fpureg * 2]) = value;
+  *base::bit_cast<float*>(&FPUregisters_[fpureg * 2]) = value;
 }
 
 void Simulator::set_fpu_register_double(int fpureg, double value) {
   if (IsFp64Mode()) {
     DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-    *bit_cast<double*>(&FPUregisters_[fpureg * 2]) = value;
+    *base::bit_cast<double*>(&FPUregisters_[fpureg * 2]) = value;
   } else {
     DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters) && ((fpureg % 2) == 0));
-    int64_t i64 = bit_cast<int64_t>(value);
+    int64_t i64 = base::bit_cast<int64_t>(value);
     set_fpu_register_word(fpureg, i64 & 0xFFFFFFFF);
     set_fpu_register_word(fpureg + 1, i64 >> 32);
   }
@@ -1023,19 +1023,20 @@ int32_t Simulator::get_fpu_register_hi_word(int fpureg) const {
 
 float Simulator::get_fpu_register_float(int fpureg) const {
   DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-  return *bit_cast<float*>(const_cast<int64_t*>(&FPUregisters_[fpureg * 2]));
+  return *base::bit_cast<float*>(
+      const_cast<int64_t*>(&FPUregisters_[fpureg * 2]));
 }
 
 double Simulator::get_fpu_register_double(int fpureg) const {
   if (IsFp64Mode()) {
     DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-    return *bit_cast<double*>(&FPUregisters_[fpureg * 2]);
+    return *base::bit_cast<double*>(&FPUregisters_[fpureg * 2]);
   } else {
     DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters) && ((fpureg % 2) == 0));
     int64_t i64;
     i64 = static_cast<uint32_t>(get_fpu_register_word(fpureg));
     i64 |= static_cast<uint64_t>(get_fpu_register_word(fpureg + 1)) << 32;
-    return bit_cast<double>(i64);
+    return base::bit_cast<double>(i64);
   }
 }
 
@@ -1626,7 +1627,7 @@ int32_t Simulator::get_pc() const { return registers_[pc]; }
 // get the correct MIPS-like behaviour on unaligned accesses.
 
 void Simulator::TraceRegWr(int32_t value, TraceType t) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     union {
       int32_t fmt_int32;
       float fmt_float;
@@ -1651,7 +1652,7 @@ void Simulator::TraceRegWr(int32_t value, TraceType t) {
 }
 
 void Simulator::TraceRegWr(int64_t value, TraceType t) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     union {
       int64_t fmt_int64;
       double fmt_double;
@@ -1677,7 +1678,7 @@ void Simulator::TraceRegWr(int64_t value, TraceType t) {
 
 template <typename T>
 void Simulator::TraceMSARegWr(T* value, TraceType t) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     union {
       uint8_t b[16];
       uint16_t h[8];
@@ -1730,7 +1731,7 @@ void Simulator::TraceMSARegWr(T* value, TraceType t) {
 
 template <typename T>
 void Simulator::TraceMSARegWr(T* value) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     union {
       uint8_t b[kMSALanesByte];
       uint16_t h[kMSALanesHalf];
@@ -1767,7 +1768,7 @@ void Simulator::TraceMSARegWr(T* value) {
 
 // TODO(plind): consider making icount_ printing a flag option.
 void Simulator::TraceMemRd(int32_t addr, int32_t value, TraceType t) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     union {
       int32_t fmt_int32;
       float fmt_float;
@@ -1793,7 +1794,7 @@ void Simulator::TraceMemRd(int32_t addr, int32_t value, TraceType t) {
 }
 
 void Simulator::TraceMemWr(int32_t addr, int32_t value, TraceType t) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     switch (t) {
       case BYTE:
         SNPrintF(trace_buf_,
@@ -1818,7 +1819,7 @@ void Simulator::TraceMemWr(int32_t addr, int32_t value, TraceType t) {
 
 template <typename T>
 void Simulator::TraceMemRd(int32_t addr, T value) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     switch (sizeof(T)) {
       case 1:
         SNPrintF(trace_buf_,
@@ -1856,7 +1857,7 @@ void Simulator::TraceMemRd(int32_t addr, T value) {
 
 template <typename T>
 void Simulator::TraceMemWr(int32_t addr, T value) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     switch (sizeof(T)) {
       case 1:
         SNPrintF(trace_buf_,
@@ -1885,7 +1886,7 @@ void Simulator::TraceMemWr(int32_t addr, T value) {
 }
 
 void Simulator::TraceMemRd(int32_t addr, int64_t value, TraceType t) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     union {
       int64_t fmt_int64;
       int32_t fmt_int32[2];
@@ -1920,7 +1921,7 @@ void Simulator::TraceMemRd(int32_t addr, int64_t value, TraceType t) {
 }
 
 void Simulator::TraceMemWr(int32_t addr, int64_t value, TraceType t) {
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     switch (t) {
       case DWORD:
         SNPrintF(trace_buf_,
@@ -2244,7 +2245,7 @@ void Simulator::SoftwareInterrupt() {
     int32_t arg17 = stack_pointer[17];
     int32_t arg18 = stack_pointer[18];
     int32_t arg19 = stack_pointer[19];
-    STATIC_ASSERT(kMaxCParameters == 20);
+    static_assert(kMaxCParameters == 20);
 
     bool fp_call =
         (redirection->type() == ExternalReference::BUILTIN_FP_FP_CALL) ||
@@ -2315,7 +2316,7 @@ void Simulator::SoftwareInterrupt() {
       GetFpArgs(&dval0, &dval1, &ival);
       SimulatorRuntimeCall generic_target =
           reinterpret_cast<SimulatorRuntimeCall>(external);
-      if (::v8::internal::FLAG_trace_sim) {
+      if (v8_flags.trace_sim) {
         switch (redirection->type()) {
           case ExternalReference::BUILTIN_FP_FP_CALL:
           case ExternalReference::BUILTIN_COMPARE_CALL:
@@ -2370,7 +2371,7 @@ void Simulator::SoftwareInterrupt() {
         default:
           UNREACHABLE();
       }
-      if (::v8::internal::FLAG_trace_sim) {
+      if (v8_flags.trace_sim) {
         switch (redirection->type()) {
           case ExternalReference::BUILTIN_COMPARE_CALL:
             PrintF("Returned %08x\n", static_cast<int32_t>(iresult));
@@ -2385,7 +2386,7 @@ void Simulator::SoftwareInterrupt() {
         }
       }
     } else if (redirection->type() == ExternalReference::DIRECT_API_CALL) {
-      if (::v8::internal::FLAG_trace_sim) {
+      if (v8_flags.trace_sim) {
         PrintF("Call to host function at %p args %08x\n",
                reinterpret_cast<void*>(external), arg0);
       }
@@ -2393,15 +2394,15 @@ void Simulator::SoftwareInterrupt() {
           reinterpret_cast<SimulatorRuntimeDirectApiCall>(external);
       target(arg0);
     } else if (redirection->type() == ExternalReference::PROFILING_API_CALL) {
-      if (::v8::internal::FLAG_trace_sim) {
+      if (v8_flags.trace_sim) {
         PrintF("Call to host function at %p args %08x %08x\n",
                reinterpret_cast<void*>(external), arg0, arg1);
       }
       SimulatorRuntimeProfilingApiCall target =
           reinterpret_cast<SimulatorRuntimeProfilingApiCall>(external);
-      target(arg0, Redirection::ReverseRedirection(arg1));
+      target(arg0, Redirection::UnwrapRedirection(arg1));
     } else if (redirection->type() == ExternalReference::DIRECT_GETTER_CALL) {
-      if (::v8::internal::FLAG_trace_sim) {
+      if (v8_flags.trace_sim) {
         PrintF("Call to host function at %p args %08x %08x\n",
                reinterpret_cast<void*>(external), arg0, arg1);
       }
@@ -2410,19 +2411,19 @@ void Simulator::SoftwareInterrupt() {
       target(arg0, arg1);
     } else if (redirection->type() ==
                ExternalReference::PROFILING_GETTER_CALL) {
-      if (::v8::internal::FLAG_trace_sim) {
+      if (v8_flags.trace_sim) {
         PrintF("Call to host function at %p args %08x %08x %08x\n",
                reinterpret_cast<void*>(external), arg0, arg1, arg2);
       }
       SimulatorRuntimeProfilingGetterCall target =
           reinterpret_cast<SimulatorRuntimeProfilingGetterCall>(external);
-      target(arg0, arg1, Redirection::ReverseRedirection(arg2));
+      target(arg0, arg1, Redirection::UnwrapRedirection(arg2));
     } else {
       DCHECK(redirection->type() == ExternalReference::BUILTIN_CALL ||
              redirection->type() == ExternalReference::BUILTIN_CALL_PAIR);
       SimulatorRuntimeCall target =
           reinterpret_cast<SimulatorRuntimeCall>(external);
-      if (::v8::internal::FLAG_trace_sim) {
+      if (v8_flags.trace_sim) {
         PrintF(
             "Call to host function at %p "
             "args %08x, %08x, %08x, %08x, %08x, %08x, %08x, %08x, %08x, %08xi, "
@@ -2438,7 +2439,7 @@ void Simulator::SoftwareInterrupt() {
       set_register(v0, static_cast<int32_t>(result));
       set_register(v1, static_cast<int32_t>(result >> 32));
     }
-    if (::v8::internal::FLAG_trace_sim) {
+    if (v8_flags.trace_sim) {
       PrintF("Returned %08x : %08x\n", get_register(v1), get_register(v0));
     }
     set_register(ra, saved_ra);
@@ -2684,8 +2685,8 @@ void Simulator::DecodeTypeRegisterDRsType() {
   ft = (instr_.FunctionFieldRaw() != MOVF) ? get_fpu_register_double(ft_reg())
                                            : 0.0;
   fd = get_fpu_register_double(fd_reg());
-  int64_t ft_int = bit_cast<int64_t>(ft);
-  int64_t fd_int = bit_cast<int64_t>(fd);
+  int64_t ft_int = base::bit_cast<int64_t>(ft);
+  int64_t fd_int = base::bit_cast<int64_t>(fd);
   cc = instr_.FCccValue();
   fcsr_cc = get_fcsr_condition_bit(cc);
   switch (instr_.FunctionFieldRaw()) {
@@ -3001,7 +3002,7 @@ void Simulator::DecodeTypeRegisterDRsType() {
     }
     case CLASS_D: {  // Mips32r6 instruction
       // Convert double input to uint64_t for easier bit manipulation
-      uint64_t classed = bit_cast<uint64_t>(fs);
+      uint64_t classed = base::bit_cast<uint64_t>(fs);
 
       // Extracting sign, exponent and mantissa from the input double
       uint32_t sign = (classed >> 63) & 1;
@@ -3059,7 +3060,7 @@ void Simulator::DecodeTypeRegisterDRsType() {
 
       DCHECK_NE(result, 0);
 
-      dResult = bit_cast<double>(result);
+      dResult = base::bit_cast<double>(result);
       SetFPUDoubleResult(fd_reg(), dResult);
 
       break;
@@ -3170,8 +3171,8 @@ void Simulator::DecodeTypeRegisterSRsType() {
   fs = get_fpu_register_float(fs_reg());
   ft = get_fpu_register_float(ft_reg());
   fd = get_fpu_register_float(fd_reg());
-  int32_t ft_int = bit_cast<int32_t>(ft);
-  int32_t fd_int = bit_cast<int32_t>(fd);
+  int32_t ft_int = base::bit_cast<int32_t>(ft);
+  int32_t fd_int = base::bit_cast<int32_t>(fd);
   uint32_t cc, fcsr_cc;
   cc = instr_.FCccValue();
   fcsr_cc = get_fcsr_condition_bit(cc);
@@ -3314,7 +3315,7 @@ void Simulator::DecodeTypeRegisterSRsType() {
     case CLASS_S: {  // Mips32r6 instruction
       // Convert float input to uint32_t for easier bit manipulation
       float fs = get_fpu_register_float(fs_reg());
-      uint32_t classed = bit_cast<uint32_t>(fs);
+      uint32_t classed = base::bit_cast<uint32_t>(fs);
 
       // Extracting sign, exponent and mantissa from the input float
       uint32_t sign = (classed >> 31) & 1;
@@ -3372,7 +3373,7 @@ void Simulator::DecodeTypeRegisterSRsType() {
 
       DCHECK_NE(result, 0);
 
-      fResult = bit_cast<float>(result);
+      fResult = base::bit_cast<float>(result);
       SetFPUFloatResult(fd_reg(), fResult);
 
       break;
@@ -4557,12 +4558,12 @@ void Simulator::DecodeTypeMsaELM() {
   switch (opcode) {
     case CTCMSA:
       DCHECK_EQ(sa(), kMSACSRRegister);
-      MSACSR_ = bit_cast<uint32_t>(registers_[rd_reg()]);
+      MSACSR_ = base::bit_cast<uint32_t>(registers_[rd_reg()]);
       TraceRegWr(static_cast<int32_t>(MSACSR_));
       break;
     case CFCMSA:
       DCHECK_EQ(rd_reg(), kMSACSRRegister);
-      SetResult(sa(), bit_cast<int32_t>(MSACSR_));
+      SetResult(sa(), base::bit_cast<int32_t>(MSACSR_));
       break;
     case MOVE_V: {
       msa_reg_t ws;
@@ -5402,44 +5403,44 @@ void Msa3RFInstrHelper(uint32_t opcode, T_reg ws, T_reg wt, T_reg* wd) {
       }
     } break;
     case FADD:
-      *wd = bit_cast<T_int>(s_element + t_element);
+      *wd = base::bit_cast<T_int>(s_element + t_element);
       break;
     case FSUB:
-      *wd = bit_cast<T_int>(s_element - t_element);
+      *wd = base::bit_cast<T_int>(s_element - t_element);
       break;
     case FMUL:
-      *wd = bit_cast<T_int>(s_element * t_element);
+      *wd = base::bit_cast<T_int>(s_element * t_element);
       break;
     case FDIV: {
       if (t_element == 0) {
-        *wd = bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
+        *wd = base::bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
       } else {
-        *wd = bit_cast<T_int>(s_element / t_element);
+        *wd = base::bit_cast<T_int>(s_element / t_element);
       }
     } break;
     case FMADD:
-      *wd = bit_cast<T_int>(
+      *wd = base::bit_cast<T_int>(
           std::fma(s_element, t_element, *reinterpret_cast<T_fp*>(wd)));
       break;
     case FMSUB:
-      *wd = bit_cast<T_int>(
+      *wd = base::bit_cast<T_int>(
           std::fma(s_element, -t_element, *reinterpret_cast<T_fp*>(wd)));
       break;
     case FEXP2:
-      *wd = bit_cast<T_int>(std::ldexp(s_element, static_cast<int>(wt)));
+      *wd = base::bit_cast<T_int>(std::ldexp(s_element, static_cast<int>(wt)));
       break;
     case FMIN:
-      *wd = bit_cast<T_int>(std::min(s_element, t_element));
+      *wd = base::bit_cast<T_int>(std::min(s_element, t_element));
       break;
     case FMAX:
-      *wd = bit_cast<T_int>(std::max(s_element, t_element));
+      *wd = base::bit_cast<T_int>(std::max(s_element, t_element));
       break;
     case FMIN_A: {
-      *wd = bit_cast<T_int>(
+      *wd = base::bit_cast<T_int>(
           std::fabs(s_element) < std::fabs(t_element) ? s_element : t_element);
     } break;
     case FMAX_A: {
-      *wd = bit_cast<T_int>(
+      *wd = base::bit_cast<T_int>(
           std::fabs(s_element) > std::fabs(t_element) ? s_element : t_element);
     } break;
     case FSOR:
@@ -5474,7 +5475,8 @@ void Msa3RFInstrHelper2(uint32_t opcode, T_reg ws, T_reg wt, T_reg* wd) {
   switch (opcode) {
     case MUL_Q: {
       const T_int_dbl min_fix_dbl =
-          bit_cast<T_uint_dbl>(std::numeric_limits<T_int_dbl>::min()) >> 1U;
+          base::bit_cast<T_uint_dbl>(std::numeric_limits<T_int_dbl>::min()) >>
+          1U;
       const T_int_dbl max_fix_dbl = std::numeric_limits<T_int_dbl>::max() >> 1U;
       if (product == min_fix_dbl) {
         product = max_fix_dbl;
@@ -5493,7 +5495,8 @@ void Msa3RFInstrHelper2(uint32_t opcode, T_reg ws, T_reg wt, T_reg* wd) {
     } break;
     case MULR_Q: {
       const T_int_dbl min_fix_dbl =
-          bit_cast<T_uint_dbl>(std::numeric_limits<T_int_dbl>::min()) >> 1U;
+          base::bit_cast<T_uint_dbl>(std::numeric_limits<T_int_dbl>::min()) >>
+          1U;
       const T_int_dbl max_fix_dbl = std::numeric_limits<T_int_dbl>::max() >> 1U;
       if (product == min_fix_dbl) {
         *wd = static_cast<T_int>(max_fix_dbl >> shift);
@@ -5622,10 +5625,10 @@ void Simulator::DecodeTypeMsa3RF() {
           break;
         case MSA_WORD:
           for (int i = 0; i < kMSALanesDword; i++) {
-            wd.w[i + kMSALanesWord / 2] = bit_cast<int32_t>(
-                static_cast<float>(bit_cast<double>(ws.d[i])));
-            wd.w[i] = bit_cast<int32_t>(
-                static_cast<float>(bit_cast<double>(wt.d[i])));
+            wd.w[i + kMSALanesWord / 2] = base::bit_cast<int32_t>(
+                static_cast<float>(base::bit_cast<double>(ws.d[i])));
+            wd.w[i] = base::bit_cast<int32_t>(
+                static_cast<float>(base::bit_cast<double>(wt.d[i])));
           }
           break;
         default:
@@ -5636,7 +5639,7 @@ void Simulator::DecodeTypeMsa3RF() {
 #undef FEXDO_DF
     case FTQ:
 #define FTQ_DF(source, dst, fp_type, int_type)                  \
-  element = bit_cast<fp_type>(source) *                         \
+  element = base::bit_cast<fp_type>(source) *                   \
             (1U << (sizeof(int_type) * kBitsPerByte - 1));      \
   if (element > std::numeric_limits<int_type>::max()) {         \
     dst = std::numeric_limits<int_type>::max();                 \
@@ -5898,8 +5901,8 @@ void Simulator::DecodeTypeMsa2R() {
 }
 
 #define BIT(n) (0x1LL << n)
-#define QUIET_BIT_S(nan) (bit_cast<int32_t>(nan) & BIT(22))
-#define QUIET_BIT_D(nan) (bit_cast<int64_t>(nan) & BIT(51))
+#define QUIET_BIT_S(nan) (base::bit_cast<int32_t>(nan) & BIT(22))
+#define QUIET_BIT_D(nan) (base::bit_cast<int64_t>(nan) & BIT(51))
 static inline bool isSnan(float fp) { return !QUIET_BIT_S(fp); }
 static inline bool isSnan(double fp) { return !QUIET_BIT_D(fp); }
 #undef QUIET_BIT_S
@@ -5975,7 +5978,7 @@ T_int Msa2RFInstrHelper(uint32_t opcode, T_src src, T_dst* dst,
 #undef POS_SUBNORMAL_BIT
 #undef POS_ZERO_BIT
     case FTRUNC_S: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       const T_int max_int = std::numeric_limits<T_int>::max();
       const T_int min_int = std::numeric_limits<T_int>::min();
       if (std::isnan(element)) {
@@ -5988,7 +5991,7 @@ T_int Msa2RFInstrHelper(uint32_t opcode, T_src src, T_dst* dst,
       break;
     }
     case FTRUNC_U: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       const T_uint max_int = std::numeric_limits<T_uint>::max();
       if (std::isnan(element)) {
         *dst = 0;
@@ -6000,61 +6003,62 @@ T_int Msa2RFInstrHelper(uint32_t opcode, T_src src, T_dst* dst,
       break;
     }
     case FSQRT: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       if (element < 0 || std::isnan(element)) {
-        *dst = bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
+        *dst = base::bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
       } else {
-        *dst = bit_cast<T_int>(std::sqrt(element));
+        *dst = base::bit_cast<T_int>(std::sqrt(element));
       }
       break;
     }
     case FRSQRT: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       if (element < 0 || std::isnan(element)) {
-        *dst = bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
+        *dst = base::bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
       } else {
-        *dst = bit_cast<T_int>(1 / std::sqrt(element));
+        *dst = base::bit_cast<T_int>(1 / std::sqrt(element));
       }
       break;
     }
     case FRCP: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       if (std::isnan(element)) {
-        *dst = bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
+        *dst = base::bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
       } else {
-        *dst = bit_cast<T_int>(1 / element);
+        *dst = base::bit_cast<T_int>(1 / element);
       }
       break;
     }
     case FRINT: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       if (std::isnan(element)) {
-        *dst = bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
+        *dst = base::bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
       } else {
         T_int dummy;
         sim->round_according_to_msacsr<T_fp, T_int>(element, &element, &dummy);
-        *dst = bit_cast<T_int>(element);
+        *dst = base::bit_cast<T_int>(element);
       }
       break;
     }
     case FLOG2: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       switch (std::fpclassify(element)) {
         case FP_NORMAL:
         case FP_SUBNORMAL:
-          *dst = bit_cast<T_int>(std::logb(element));
+          *dst = base::bit_cast<T_int>(std::logb(element));
           break;
         case FP_ZERO:
-          *dst = bit_cast<T_int>(-std::numeric_limits<T_fp>::infinity());
+          *dst = base::bit_cast<T_int>(-std::numeric_limits<T_fp>::infinity());
           break;
         case FP_NAN:
-          *dst = bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
+          *dst = base::bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
           break;
         case FP_INFINITE:
           if (element < 0) {
-            *dst = bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
+            *dst =
+                base::bit_cast<T_int>(std::numeric_limits<T_fp>::quiet_NaN());
           } else {
-            *dst = bit_cast<T_int>(std::numeric_limits<T_fp>::infinity());
+            *dst = base::bit_cast<T_int>(std::numeric_limits<T_fp>::infinity());
           }
           break;
         default:
@@ -6063,7 +6067,7 @@ T_int Msa2RFInstrHelper(uint32_t opcode, T_src src, T_dst* dst,
       break;
     }
     case FTINT_S: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       const T_int max_int = std::numeric_limits<T_int>::max();
       const T_int min_int = std::numeric_limits<T_int>::min();
       if (std::isnan(element)) {
@@ -6076,7 +6080,7 @@ T_int Msa2RFInstrHelper(uint32_t opcode, T_src src, T_dst* dst,
       break;
     }
     case FTINT_U: {
-      T_fp element = bit_cast<T_fp>(src);
+      T_fp element = base::bit_cast<T_fp>(src);
       const T_uint max_uint = std::numeric_limits<T_uint>::max();
       if (std::isnan(element)) {
         *dst = 0;
@@ -6090,11 +6094,12 @@ T_int Msa2RFInstrHelper(uint32_t opcode, T_src src, T_dst* dst,
       break;
     }
     case FFINT_S:
-      *dst = bit_cast<T_int>(static_cast<T_fp>(src));
+      *dst = base::bit_cast<T_int>(static_cast<T_fp>(src));
       break;
     case FFINT_U:
       using uT_src = typename std::make_unsigned<T_src>::type;
-      *dst = bit_cast<T_int>(static_cast<T_fp>(bit_cast<uT_src>(src)));
+      *dst =
+          base::bit_cast<T_int>(static_cast<T_fp>(base::bit_cast<uT_src>(src)));
       break;
     default:
       UNREACHABLE();
@@ -6110,61 +6115,65 @@ T_int Msa2RFInstrHelper2(uint32_t opcode, T_reg ws, int i) {
 #define EXTRACT_FLOAT16_FRAC(fp16) (fp16 & 0x3FF)
 #define PACK_FLOAT32(sign, exp, frac) \
   static_cast<uint32_t>(((sign) << 31) + ((exp) << 23) + (frac))
-#define FEXUP_DF(src_index)                                                   \
-  uint_fast16_t element = ws.uh[src_index];                                   \
-  uint_fast32_t aSign, aFrac;                                                 \
-  int_fast32_t aExp;                                                          \
-  aSign = EXTRACT_FLOAT16_SIGN(element);                                      \
-  aExp = EXTRACT_FLOAT16_EXP(element);                                        \
-  aFrac = EXTRACT_FLOAT16_FRAC(element);                                      \
-  if (V8_LIKELY(aExp && aExp != 0x1F)) {                                      \
-    return PACK_FLOAT32(aSign, aExp + 0x70, aFrac << 13);                     \
-  } else if (aExp == 0x1F) {                                                  \
-    if (aFrac) {                                                              \
-      return bit_cast<int32_t>(std::numeric_limits<float>::quiet_NaN());      \
-    } else {                                                                  \
-      return bit_cast<uint32_t>(std::numeric_limits<float>::infinity()) |     \
-             static_cast<uint32_t>(aSign) << 31;                              \
-    }                                                                         \
-  } else {                                                                    \
-    if (aFrac == 0) {                                                         \
-      return PACK_FLOAT32(aSign, 0, 0);                                       \
-    } else {                                                                  \
-      int_fast16_t shiftCount =                                               \
-          base::bits::CountLeadingZeros32(static_cast<uint32_t>(aFrac)) - 21; \
-      aFrac <<= shiftCount;                                                   \
-      aExp = -shiftCount;                                                     \
-      return PACK_FLOAT32(aSign, aExp + 0x70, aFrac << 13);                   \
-    }                                                                         \
+#define FEXUP_DF(src_index)                                                    \
+  uint_fast16_t element = ws.uh[src_index];                                    \
+  uint_fast32_t aSign, aFrac;                                                  \
+  int_fast32_t aExp;                                                           \
+  aSign = EXTRACT_FLOAT16_SIGN(element);                                       \
+  aExp = EXTRACT_FLOAT16_EXP(element);                                         \
+  aFrac = EXTRACT_FLOAT16_FRAC(element);                                       \
+  if (V8_LIKELY(aExp && aExp != 0x1F)) {                                       \
+    return PACK_FLOAT32(aSign, aExp + 0x70, aFrac << 13);                      \
+  } else if (aExp == 0x1F) {                                                   \
+    if (aFrac) {                                                               \
+      return base::bit_cast<int32_t>(std::numeric_limits<float>::quiet_NaN()); \
+    } else {                                                                   \
+      return base::bit_cast<uint32_t>(                                         \
+                 std::numeric_limits<float>::infinity()) |                     \
+             static_cast<uint32_t>(aSign) << 31;                               \
+    }                                                                          \
+  } else {                                                                     \
+    if (aFrac == 0) {                                                          \
+      return PACK_FLOAT32(aSign, 0, 0);                                        \
+    } else {                                                                   \
+      int_fast16_t shiftCount =                                                \
+          base::bits::CountLeadingZeros32(static_cast<uint32_t>(aFrac)) - 21;  \
+      aFrac <<= shiftCount;                                                    \
+      aExp = -shiftCount;                                                      \
+      return PACK_FLOAT32(aSign, aExp + 0x70, aFrac << 13);                    \
+    }                                                                          \
   }
     case FEXUPL:
       if (std::is_same<int32_t, T_int>::value) {
         FEXUP_DF(i + kMSALanesWord)
       } else {
-        return bit_cast<int64_t>(
-            static_cast<double>(bit_cast<float>(ws.w[i + kMSALanesDword])));
+        return base::bit_cast<int64_t>(static_cast<double>(
+            base::bit_cast<float>(ws.w[i + kMSALanesDword])));
       }
     case FEXUPR:
       if (std::is_same<int32_t, T_int>::value) {
         FEXUP_DF(i)
       } else {
-        return bit_cast<int64_t>(static_cast<double>(bit_cast<float>(ws.w[i])));
+        return base::bit_cast<int64_t>(
+            static_cast<double>(base::bit_cast<float>(ws.w[i])));
       }
     case FFQL: {
       if (std::is_same<int32_t, T_int>::value) {
-        return bit_cast<int32_t>(static_cast<float>(ws.h[i + kMSALanesWord]) /
-                                 (1U << 15));
+        return base::bit_cast<int32_t>(
+            static_cast<float>(ws.h[i + kMSALanesWord]) / (1U << 15));
       } else {
-        return bit_cast<int64_t>(static_cast<double>(ws.w[i + kMSALanesDword]) /
-                                 (1U << 31));
+        return base::bit_cast<int64_t>(
+            static_cast<double>(ws.w[i + kMSALanesDword]) / (1U << 31));
       }
       break;
     }
     case FFQR: {
       if (std::is_same<int32_t, T_int>::value) {
-        return bit_cast<int32_t>(static_cast<float>(ws.h[i]) / (1U << 15));
+        return base::bit_cast<int32_t>(static_cast<float>(ws.h[i]) /
+                                       (1U << 15));
       } else {
-        return bit_cast<int64_t>(static_cast<double>(ws.w[i]) / (1U << 31));
+        return base::bit_cast<int64_t>(static_cast<double>(ws.w[i]) /
+                                       (1U << 31));
       }
       break;
       default:
@@ -6329,7 +6338,7 @@ void Simulator::DecodeTypeImmediate() {
     int32_t current_pc = get_pc();
     const int32_t bitsIn16Int = sizeof(int16_t) * kBitsPerByte;
     if (do_branch) {
-      if (FLAG_debug_code) {
+      if (v8_flags.debug_code) {
         int16_t bits = imm16 & 0xFC;
         if (imm16 >= 0) {
           CHECK_EQ(bits, 0);
@@ -6909,12 +6918,12 @@ void Simulator::DecodeTypeJump() {
 
 // Executes the current instruction.
 void Simulator::InstructionDecode(Instruction* instr) {
-  if (v8::internal::FLAG_check_icache) {
+  if (v8_flags.check_icache) {
     CheckICache(i_cache(), instr);
   }
   pc_modified_ = false;
   v8::base::EmbeddedVector<char, 256> buffer;
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     SNPrintF(trace_buf_, "%s", "");
     disasm::NameConverter converter;
     disasm::Disassembler dasm(converter);
@@ -6935,7 +6944,7 @@ void Simulator::InstructionDecode(Instruction* instr) {
     default:
       UNSUPPORTED();
   }
-  if (::v8::internal::FLAG_trace_sim) {
+  if (v8_flags.trace_sim) {
     PrintF("  0x%08" PRIxPTR "  %-44s   %s\n",
            reinterpret_cast<intptr_t>(instr), buffer.begin(),
            trace_buf_.begin());
@@ -6949,7 +6958,7 @@ void Simulator::Execute() {
   // Get the PC to simulate. Cannot use the accessor here as we need the
   // raw PC value and not the one used as input to arithmetic instructions.
   int program_counter = get_pc();
-  if (::v8::internal::FLAG_stop_sim_at == 0) {
+  if (v8_flags.stop_sim_at == 0) {
     // Fast version of the dispatch loop without checking whether the simulator
     // should be stopping at a particular executed instruction.
     while (program_counter != end_sim_pc) {
@@ -6959,12 +6968,12 @@ void Simulator::Execute() {
       program_counter = get_pc();
     }
   } else {
-    // FLAG_stop_sim_at is at the non-default value. Stop in the debugger when
-    // we reach the particular instruction count.
+    // v8_flags.stop_sim_at is at the non-default value. Stop in the debugger
+    // when we reach the particular instruction count.
     while (program_counter != end_sim_pc) {
       Instruction* instr = reinterpret_cast<Instruction*>(program_counter);
       icount_++;
-      if (icount_ == static_cast<uint64_t>(::v8::internal::FLAG_stop_sim_at)) {
+      if (icount_ == static_cast<uint64_t>(v8_flags.stop_sim_at)) {
         MipsDebugger dbg(this);
         dbg.Debug();
       } else {

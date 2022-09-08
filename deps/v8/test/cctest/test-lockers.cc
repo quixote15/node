@@ -33,13 +33,8 @@
 #include "include/v8-function.h"
 #include "include/v8-locker.h"
 #include "src/base/platform/platform.h"
-#include "src/codegen/compilation-cache.h"
-#include "src/execution/execution.h"
-#include "src/execution/isolate.h"
-#include "src/init/v8.h"
 #include "src/objects/objects-inl.h"
 #include "src/strings/unicode-inl.h"
-#include "src/utils/utils.h"
 #include "test/cctest/cctest.h"
 
 namespace {
@@ -437,7 +432,7 @@ static void StartJoinAndDeleteThreads(
 
 // Run many threads all locking on the same isolate
 TEST(IsolateLockingStress) {
-  i::FLAG_always_opt = false;
+  i::FLAG_always_turbofan = false;
 #if V8_TARGET_ARCH_MIPS
   const int kNThreads = 50;
 #else
@@ -482,7 +477,7 @@ class IsolateNestedLockingThread : public JoinableThread {
 
 // Run  many threads with nested locks
 TEST(IsolateNestedLocking) {
-  i::FLAG_always_opt = false;
+  i::FLAG_always_turbofan = false;
 #if V8_TARGET_ARCH_MIPS
   const int kNThreads = 50;
 #else
@@ -528,7 +523,7 @@ class SeparateIsolatesLocksNonexclusiveThread : public JoinableThread {
 
 // Run parallel threads that lock and access different isolates in parallel
 TEST(SeparateIsolatesLocksNonexclusive) {
-  i::FLAG_always_opt = false;
+  i::FLAG_always_turbofan = false;
 #if V8_TARGET_ARCH_ARM || V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_S390
   const int kNThreads = 50;
 #else
@@ -613,7 +608,7 @@ class LockerUnlockerThread : public JoinableThread {
 
 // Use unlocker inside of a Locker, multiple threads.
 TEST(LockerUnlocker) {
-  i::FLAG_always_opt = false;
+  i::FLAG_always_turbofan = false;
 #if V8_TARGET_ARCH_ARM || V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_S390
   const int kNThreads = 50;
 #else
@@ -671,7 +666,7 @@ class LockTwiceAndUnlockThread : public JoinableThread {
 
 // Use Unlocker inside two Lockers.
 TEST(LockTwiceAndUnlock) {
-  i::FLAG_always_opt = false;
+  i::FLAG_always_turbofan = false;
 #if V8_TARGET_ARCH_ARM || V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_S390
   const int kNThreads = 50;
 #else

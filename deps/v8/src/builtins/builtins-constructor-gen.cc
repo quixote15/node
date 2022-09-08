@@ -5,6 +5,7 @@
 #include "src/builtins/builtins-constructor-gen.h"
 
 #include "src/ast/ast.h"
+#include "src/base/macros.h"
 #include "src/builtins/builtins-call-gen.h"
 #include "src/builtins/builtins-constructor.h"
 #include "src/builtins/builtins-utils-gen.h"
@@ -12,10 +13,13 @@
 #include "src/codegen/code-factory.h"
 #include "src/codegen/code-stub-assembler.h"
 #include "src/codegen/interface-descriptors.h"
+#include "src/codegen/machine-type.h"
 #include "src/codegen/macro-assembler.h"
+#include "src/codegen/tnode.h"
 #include "src/common/globals.h"
 #include "src/logging/counters.h"
 #include "src/objects/objects-inl.h"
+#include "src/objects/objects.h"
 
 namespace v8 {
 namespace internal {
@@ -180,8 +184,6 @@ TF_BUILTIN(FastNewClosure, ConstructorBuiltinsAssembler) {
   auto feedback_cell = Parameter<FeedbackCell>(Descriptor::kFeedbackCell);
   auto context = Parameter<Context>(Descriptor::kContext);
 
-  IncrementCounter(isolate()->counters()->fast_new_closure_total(), 1);
-
   // Bump the closure counter encoded the {feedback_cell}s map.
   {
     const TNode<Map> feedback_cell_map = LoadMap(feedback_cell);
@@ -248,7 +250,7 @@ TF_BUILTIN(FastNewClosure, ConstructorBuiltinsAssembler) {
     BIND(&done);
   }
 
-  STATIC_ASSERT(JSFunction::kSizeWithoutPrototype == 7 * kTaggedSize);
+  static_assert(JSFunction::kSizeWithoutPrototype == 7 * kTaggedSize);
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kFeedbackCellOffset,
                                  feedback_cell);
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kSharedFunctionInfoOffset,
@@ -401,14 +403,14 @@ TNode<JSRegExp> ConstructorBuiltinsAssembler::CreateRegExpLiteral(
       CAST(LoadFeedbackVectorSlot(feedback_vector, slot));
   GotoIfNot(HasBoilerplate(literal_site), &call_runtime);
   {
-    STATIC_ASSERT(JSRegExp::kDataOffset == JSObject::kHeaderSize);
-    STATIC_ASSERT(JSRegExp::kSourceOffset ==
+    static_assert(JSRegExp::kDataOffset == JSObject::kHeaderSize);
+    static_assert(JSRegExp::kSourceOffset ==
                   JSRegExp::kDataOffset + kTaggedSize);
-    STATIC_ASSERT(JSRegExp::kFlagsOffset ==
+    static_assert(JSRegExp::kFlagsOffset ==
                   JSRegExp::kSourceOffset + kTaggedSize);
-    STATIC_ASSERT(JSRegExp::kHeaderSize ==
+    static_assert(JSRegExp::kHeaderSize ==
                   JSRegExp::kFlagsOffset + kTaggedSize);
-    STATIC_ASSERT(JSRegExp::kLastIndexOffset == JSRegExp::kHeaderSize);
+    static_assert(JSRegExp::kLastIndexOffset == JSRegExp::kHeaderSize);
     DCHECK_EQ(JSRegExp::Size(), JSRegExp::kLastIndexOffset + kTaggedSize);
 
     TNode<RegExpBoilerplateDescription> boilerplate = CAST(literal_site);
@@ -595,20 +597,40 @@ TNode<HeapObject> ConstructorBuiltinsAssembler::CreateShallowObjectLiteral(
 
   // Ensure new-space allocation for a fresh JSObject so we can skip write
   // barriers when copying all object fields.
-  STATIC_ASSERT(JSObject::kMaxInstanceSize < kMaxRegularHeapObjectSize);
+  static_assert(JSObject::kMaxInstanceSize < kMaxRegularHeapObjectSize);
   TNode<IntPtrT> instance_size =
       TimesTaggedSize(LoadMapInstanceSizeInWords(boilerplate_map));
-  TNode<IntPtrT> allocation_size = instance_size;
-  bool needs_allocation_memento = FLAG_allocation_site_pretenuring;
+  TVARIABLE(IntPtrT, aligned_instance_size, instance_size);
+  TVARIABLE(IntPtrT, allocation_size, instance_size);
+  TNode<BoolT> is_instance_size_aligned;
+  constexpr int filler_size = kDoubleSize - kTaggedSize;
+  bool needs_allocation_memento = v8_flags.allocation_site_pretenuring;
   if (needs_allocation_memento) {
     DCHECK(V8_ALLOCATION_SITE_TRACKING_BOOL);
     // Prepare for inner-allocating the AllocationMemento.
     allocation_size =
         IntPtrAdd(instance_size, IntPtrConstant(AllocationMemento::kSize));
+    if (V8_COMPRESS_POINTERS_8GB_BOOL) {
+      is_instance_size_aligned = WordIsAligned(instance_size, kDoubleAlignment);
+      Label size_is_aligned(this, {&aligned_instance_size, &allocation_size});
+      Label size_is_unaligned(this);
+      Branch(is_instance_size_aligned, &size_is_aligned, &size_is_unaligned);
+
+      BIND(&size_is_unaligned);
+      {
+        allocation_size =
+            IntPtrAdd(allocation_size.value(), IntPtrConstant(filler_size));
+        aligned_instance_size =
+            IntPtrAdd(instance_size, IntPtrConstant(filler_size));
+        Goto(&size_is_aligned);
+      }
+
+      BIND(&size_is_aligned);
+    }
   }
 
   TNode<HeapObject> copy =
-      UncheckedCast<HeapObject>(AllocateInNewSpace(allocation_size));
+      UncheckedCast<HeapObject>(AllocateInNewSpace(allocation_size.value()));
   {
     Comment("Initialize Literal Copy");
     // Initialize Object fields.
@@ -622,7 +644,19 @@ TNode<HeapObject> ConstructorBuiltinsAssembler::CreateShallowObjectLiteral(
   // Initialize the AllocationMemento before potential GCs due to heap number
   // allocation when copying the in-object properties.
   if (needs_allocation_memento) {
-    InitializeAllocationMemento(copy, instance_size, allocation_site);
+    if (V8_COMPRESS_POINTERS_8GB_BOOL) {
+      Label size_is_aligned(this), size_is_unaligned(this);
+      Branch(is_instance_size_aligned, &size_is_aligned, &size_is_unaligned);
+
+      BIND(&size_is_unaligned);
+      StoreObjectFieldNoWriteBarrier(copy, instance_size,
+                                     OnePointerFillerMapConstant());
+      Goto(&size_is_aligned);
+
+      BIND(&size_is_aligned);
+    }
+    InitializeAllocationMemento(copy, aligned_instance_size.value(),
+                                allocation_site);
   }
 
   {
@@ -678,7 +712,7 @@ TNode<JSObject> ConstructorBuiltinsAssembler::CreateEmptyObjectLiteral(
   TNode<NativeContext> native_context = LoadNativeContext(context);
   TNode<Map> map = LoadObjectFunctionInitialMap(native_context);
   // Ensure that slack tracking is disabled for the map.
-  STATIC_ASSERT(Map::kNoSlackTracking == 0);
+  static_assert(Map::kNoSlackTracking == 0);
   CSA_DCHECK(this, IsClearWord32<Map::Bits3::ConstructionCounterBits>(
                        LoadMapBitField3(map)));
   TNode<FixedArray> empty_fixed_array = EmptyFixedArrayConstant();

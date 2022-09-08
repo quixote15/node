@@ -59,7 +59,9 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
   void GenerateLoadGlobalIC(TypeofMode typeof_mode);
   void GenerateLoadGlobalICTrampoline(TypeofMode typeof_mode);
   void GenerateLoadGlobalICBaseline(TypeofMode typeof_mode);
+  void GenerateLookupGlobalICTrampoline(TypeofMode typeof_mode);
   void GenerateLookupGlobalICBaseline(TypeofMode typeof_mode);
+  void GenerateLookupContextTrampoline(TypeofMode typeof_mode);
   void GenerateLookupContextBaseline(TypeofMode typeof_mode);
 
   void GenerateKeyedStoreIC();
@@ -333,6 +335,14 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
   void DefineKeyedOwnIC(const StoreICParameters* p);
   void StoreInArrayLiteralIC(const StoreICParameters* p);
 
+  void LookupGlobalIC(LazyNode<Object> lazy_name, TNode<TaggedIndex> depth,
+                      LazyNode<TaggedIndex> lazy_slot, TNode<Context> context,
+                      LazyNode<FeedbackVector> lazy_feedback_vector,
+                      TypeofMode typeof_mode);
+  void LookupContext(LazyNode<Object> lazy_name, TNode<TaggedIndex> depth,
+                     LazyNode<TaggedIndex> lazy_slot, TNode<Context> context,
+                     TypeofMode typeof_mode);
+
   // IC dispatcher behavior.
 
   // Checks monomorphic case. Returns {feedback} entry of the vector.
@@ -379,15 +389,16 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
 
   void HandleLoadCallbackProperty(const LazyLoadICParameters* p,
                                   TNode<JSObject> holder,
-                                  TNode<WordT> handler_word,
+                                  TNode<Word32T> handler_word,
                                   ExitPoint* exit_point);
 
   void HandleLoadAccessor(const LazyLoadICParameters* p,
                           TNode<CallHandlerInfo> call_handler_info,
-                          TNode<WordT> handler_word, TNode<DataHandler> handler,
-                          TNode<IntPtrT> handler_kind, ExitPoint* exit_point);
+                          TNode<Word32T> handler_word,
+                          TNode<DataHandler> handler,
+                          TNode<Uint32T> handler_kind, ExitPoint* exit_point);
 
-  void HandleLoadField(TNode<JSObject> holder, TNode<WordT> handler_word,
+  void HandleLoadField(TNode<JSObject> holder, TNode<Word32T> handler_word,
                        TVariable<Float64T>* var_double_value,
                        Label* rebox_double, Label* miss, ExitPoint* exit_point);
 
@@ -398,7 +409,8 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
                            TVariable<Float64T>* var_double_value,
                            Label* rebox_double, ExitPoint* exit_point);
 
-  void HandleLoadWasmField(TNode<WasmObject> holder, TNode<WordT> handler_word,
+  void HandleLoadWasmField(TNode<WasmObject> holder,
+                           TNode<Word32T> handler_word,
                            TVariable<Float64T>* var_double_value,
                            Label* rebox_double, ExitPoint* exit_point);
 #endif  // V8_ENABLE_WEBASSEMBLY
@@ -409,14 +421,14 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
 
   void HandleLoadICSmiHandlerLoadNamedCase(
       const LazyLoadICParameters* p, TNode<Object> holder,
-      TNode<IntPtrT> handler_kind, TNode<WordT> handler_word,
+      TNode<Uint32T> handler_kind, TNode<Word32T> handler_word,
       Label* rebox_double, TVariable<Float64T>* var_double_value,
       TNode<Object> handler, Label* miss, ExitPoint* exit_point, ICMode ic_mode,
       OnNonExistent on_nonexistent, ElementSupport support_elements);
 
   void HandleLoadICSmiHandlerHasNamedCase(const LazyLoadICParameters* p,
                                           TNode<Object> holder,
-                                          TNode<IntPtrT> handler_kind,
+                                          TNode<Uint32T> handler_kind,
                                           Label* miss, ExitPoint* exit_point,
                                           ICMode ic_mode);
 

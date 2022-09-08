@@ -6,11 +6,9 @@
 
 #include <ostream>
 
-#include "src/base/bits.h"
 #include "src/codegen/code-factory.h"
 #include "src/codegen/interface-descriptors-inl.h"
 #include "src/codegen/machine-type.h"
-#include "src/codegen/macro-assembler.h"
 #include "src/compiler/backend/instruction-selector.h"
 #include "src/compiler/graph.h"
 #include "src/compiler/js-graph.h"
@@ -19,10 +17,8 @@
 #include "src/compiler/pipeline.h"
 #include "src/compiler/raw-machine-assembler.h"
 #include "src/compiler/schedule.h"
-#include "src/execution/frames.h"
 #include "src/handles/handles-inl.h"
 #include "src/heap/factory-inl.h"
-#include "src/interpreter/bytecodes.h"
 #include "src/numbers/conversions-inl.h"
 #include "src/objects/smi.h"
 #include "src/utils/memcopy.h"
@@ -277,7 +273,7 @@ TNode<Number> CodeAssembler::NumberConstant(double value) {
   } else {
     // We allocate the heap number constant eagerly at this point instead of
     // deferring allocation to code generation
-    // (see AllocateAndInstallRequestedHeapObjects) since that makes it easier
+    // (see AllocateAndInstallRequestedHeapNumbers) since that makes it easier
     // to generate constant lookups for embedded builtins.
     return UncheckedCast<Number>(HeapConstant(
         isolate()->factory()->NewHeapNumberForCodeAssembler(value)));
@@ -947,6 +943,10 @@ CodeAssembler::AtomicCompareExchange64<AtomicUint64>(
     TNode<RawPtrT> base, TNode<WordT> offset, TNode<UintPtrT> old_value,
     TNode<UintPtrT> new_value, TNode<UintPtrT> old_value_high,
     TNode<UintPtrT> new_value_high);
+
+void CodeAssembler::MemoryBarrier(AtomicMemoryOrder order) {
+  raw_assembler()->MemoryBarrier(order);
+}
 
 void CodeAssembler::StoreRoot(RootIndex root_index, TNode<Object> value) {
   DCHECK(!RootsTable::IsImmortalImmovable(root_index));

@@ -754,8 +754,12 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
     Mthc1(src_high, dst);
   }
 
-  void Move(FPURegister dst, float imm) { Move(dst, bit_cast<uint32_t>(imm)); }
-  void Move(FPURegister dst, double imm) { Move(dst, bit_cast<uint64_t>(imm)); }
+  void Move(FPURegister dst, float imm) {
+    Move(dst, base::bit_cast<uint32_t>(imm));
+  }
+  void Move(FPURegister dst, double imm) {
+    Move(dst, base::bit_cast<uint64_t>(imm));
+  }
   void Move(FPURegister dst, uint32_t src);
   void Move(FPURegister dst, uint64_t src);
 
@@ -931,6 +935,11 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // less efficient form using xor instead of mov is emitted.
   void Swap(Register reg1, Register reg2, Register scratch = no_reg);
 
+  void TestCodeTIsMarkedForDeoptimizationAndJump(Register codet,
+                                                 Register scratch,
+                                                 Condition cond, Label* target);
+  Operand ClearedValue() const;
+
   void PushRoot(RootIndex index) {
     UseScratchRegisterScope temps(this);
     Register scratch = temps.Acquire();
@@ -1085,14 +1094,14 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
 
   void IncrementCounter(StatsCounter* counter, int value, Register scratch1,
                         Register scratch2) {
-    if (!FLAG_native_code_counters) return;
+    if (!v8_flags.native_code_counters) return;
     EmitIncrementCounter(counter, value, scratch1, scratch2);
   }
   void EmitIncrementCounter(StatsCounter* counter, int value, Register scratch1,
                             Register scratch2);
   void DecrementCounter(StatsCounter* counter, int value, Register scratch1,
                         Register scratch2) {
-    if (!FLAG_native_code_counters) return;
+    if (!v8_flags.native_code_counters) return;
     EmitDecrementCounter(counter, value, scratch1, scratch2);
   }
   void EmitDecrementCounter(StatsCounter* counter, int value, Register scratch1,

@@ -3,20 +3,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from contextlib import contextmanager
-from multiprocessing import Process, Queue
+import collections
+import logging
 import os
 import signal
-import time
 import traceback
 
-try:
-  from queue import Empty  # Python 3
-except ImportError:
-  from Queue import Empty  # Python 2
+from contextlib import contextmanager
+from multiprocessing import Process, Queue
+from queue import Empty
 
-from . import command
-from . import utils
 
 
 def setup_testing():
@@ -27,17 +23,18 @@ def setup_testing():
   global Process
   del Queue
   del Process
-  try:
-    from queue import Queue  # Python 3
-  except ImportError:
-    from Queue import Queue  # Python 2
-
+  from queue import Queue
   from threading import Thread as Process
   # Monkeypatch threading Queue to look like multiprocessing Queue.
   Queue.cancel_join_thread = lambda self: None
   # Monkeypatch os.kill and add fake pid property on Thread.
   os.kill = lambda *args: None
   Process.pid = property(lambda self: None)
+
+
+class AbortException(Exception):
+  """Indicates early abort on SIGINT, SIGTERM or internal hard timeout."""
+  pass
 
 
 class NormalResult():
@@ -76,12 +73,11 @@ def Worker(fn, work_queue, done_queue,
     for args in iter(work_queue.get, "STOP"):
       try:
         done_queue.put(NormalResult(fn(*args, **kwargs)))
-      except command.AbortException:
+      except AbortException:
         # SIGINT, SIGTERM or internal hard timeout.
         break
       except Exception as e:
-        traceback.print_exc()
-        print(">>> EXCEPTION: %s" % e)
+        logging.exception('Unhandled error during worker execution.')
         done_queue.put(ExceptionResult(e))
     # When we reach here on normal tear down, all items have been pulled from
     # the done_queue before and this should have no effect. On fast abort, it's
@@ -103,7 +99,38 @@ def without_sig():
     signal.signal(signal.SIGTERM, term_handler)
 
 
-class Pool():
+class ContextPool():
+
+  def __init__(self):
+    self.abort_now = False
+
+  def init(self, num_workers, heartbeat_timeout=1, notify_function=None):
+    """
+    Delayed initialization. At context creation time we have no access to the
+    below described parameters.
+    Args:
+      num_workers: Number of worker processes to run in parallel.
+      heartbeat_timeout: Timeout in seconds for waiting for results. Each time
+          the timeout is reached, a heartbeat is signalled and timeout is reset.
+      notify_function: Callable called to signal some events like termination. The
+          event name is passed as string.
+    """
+    pass
+
+  def add_jobs(self, jobs):
+    pass
+
+  def results(self, requirement):
+    pass
+
+  def abort(self):
+    self.abort_now = True
+
+
+ProcessContext = collections.namedtuple('ProcessContext', ['result_reduction'])
+
+
+class DefaultExecutionPool(ContextPool):
   """Distributes tasks to a number of worker processes.
   New tasks can be added dynamically even after the workers have been started.
   Requirement: Tasks can only be added from the parent process, e.g. while
@@ -113,19 +140,11 @@ class Pool():
   # Necessary to not overflow the queue's pipe if a keyboard interrupt happens.
   BUFFER_FACTOR = 4
 
-  def __init__(self, num_workers, heartbeat_timeout=1, notify_fun=None):
-    """
-    Args:
-      num_workers: Number of worker processes to run in parallel.
-      heartbeat_timeout: Timeout in seconds for waiting for results. Each time
-          the timeout is reached, a heartbeat is signalled and timeout is reset.
-      notify_fun: Callable called to signale some events like termination. The
-          event name is passed as string.
-    """
-    self.num_workers = num_workers
+  def __init__(self, os_context=None):
+    super(DefaultExecutionPool, self).__init__()
+    self.os_context = os_context
     self.processes = []
     self.terminated = False
-    self.abort_now = False
 
     # Invariant: processing_count >= #work_queue + #done_queue. It is greater
     # when a worker takes an item from the work_queue and before the result is
@@ -135,14 +154,36 @@ class Pool():
     # allowed to remove items from the done_queue and to add items to the
     # work_queue.
     self.processing_count = 0
-    self.heartbeat_timeout = heartbeat_timeout
-    self.notify = notify_fun or (lambda x: x)
 
     # Disable sigint and sigterm to prevent subprocesses from capturing the
     # signals.
     with without_sig():
       self.work_queue = Queue()
       self.done_queue = Queue()
+
+  def init(self, num_workers=1, heartbeat_timeout=1, notify_function=None):
+    """
+    Args:
+      num_workers: Number of worker processes to run in parallel.
+      heartbeat_timeout: Timeout in seconds for waiting for results. Each time
+          the timeout is reached, a heartbeat is signalled and timeout is reset.
+      notify_function: Callable called to signal some events like termination. The
+          event name is passed as string.
+    """
+    self.num_workers = num_workers
+    self.heartbeat_timeout = heartbeat_timeout
+    self.notify = notify_function or (lambda x: x)
+
+  def add_jobs(self, jobs):
+    self.add(jobs)
+
+  def results(self, requirement):
+    return self.imap_unordered(
+        fn=run_job,
+        gen=[],
+        process_context_fn=ProcessContext,
+        process_context_args=[requirement],
+    )
 
   def imap_unordered(self, fn, gen,
                      process_context_fn=None, process_context_args=None):
@@ -204,9 +245,8 @@ class Pool():
         self.advance(gen)
     except KeyboardInterrupt:
       assert False, 'Unreachable'
-    except Exception as e:
-      traceback.print_exc()
-      print(">>> EXCEPTION: %s" % e)
+    except Exception:
+      logging.exception('Unhandled error during pool execution.')
     finally:
       self._terminate()
 
@@ -243,10 +283,7 @@ class Pool():
 
   def _terminate_processes(self):
     for p in self.processes:
-      if utils.IsWindows():
-        command.taskkill_windows(p, verbose=True, force=False)
-      else:
-        os.kill(p.pid, signal.SIGTERM)
+      self.os_context.terminate_process(p)
 
   def _terminate(self):
     """Terminates execution and cleans up the queues.
@@ -281,14 +318,30 @@ class Pool():
     # Drain the queues to prevent stderr chatter when queues are garbage
     # collected.
     self.notify("Draining queues")
+    # TODO(https://crbug.com/v8/13113): Remove extra logging after
+    # investigation.
+    elem_count = 0
     try:
-      while True: self.work_queue.get(False)
-    except:
+      while True:
+        self.work_queue.get(False)
+        elem_count += 1
+        if elem_count < 200:
+          logging.info('Drained an element from work queue.')
+    except Empty:
       pass
+    except:
+      logging.exception('Error draining work queue.')
     try:
-      while True: self.done_queue.get(False)
-    except:
+      while True:
+        self.done_queue.get(False)
+        elem_count += 1
+        if elem_count < 200:
+          logging.info('Drained an element from done queue.')
+    except Empty:
       pass
+    except:
+      logging.exception('Error draining done queue.')
+    self.notify("Pool terminated")
 
   def _get_result_from_queue(self):
     """Attempts to get the next result from the queue.
@@ -308,3 +361,24 @@ class Pool():
         return MaybeResult.create_result(result.result)
       except Empty:
         return MaybeResult.create_heartbeat()
+
+
+class SingleThreadedExecutionPool(ContextPool):
+
+  def __init__(self):
+    super(SingleThreadedExecutionPool, self).__init__()
+    self.work_queue = []
+
+  def add_jobs(self, jobs):
+    self.work_queue.extend(jobs)
+
+  def results(self, requirement):
+    while self.work_queue and not self.abort_now:
+      job = self.work_queue.pop()
+      yield MaybeResult.create_result(job.run(ProcessContext(requirement)))
+
+
+# Global function for multiprocessing, because pickling a static method doesn't
+# work on Windows.
+def run_job(job, process_context):
+  return job.run(process_context)

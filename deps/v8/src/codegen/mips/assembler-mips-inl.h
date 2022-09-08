@@ -190,7 +190,7 @@ void RelocInfo::set_target_object(Heap* heap, HeapObject target,
                                      icache_flush_mode);
   }
   if (write_barrier_mode == UPDATE_WRITE_BARRIER && !host().is_null() &&
-      !FLAG_disable_write_barriers) {
+      !v8_flags.disable_write_barriers) {
     WriteBarrierForCode(host(), this, target);
   }
 }
@@ -230,6 +230,8 @@ Address RelocInfo::target_internal_reference_address() {
   DCHECK(IsInternalReference(rmode_) || IsInternalReferenceEncoded(rmode_));
   return pc_;
 }
+
+Builtin RelocInfo::target_builtin_at(Assembler* origin) { UNREACHABLE(); }
 
 Address RelocInfo::target_runtime_entry(Assembler* origin) {
   DCHECK(IsRuntimeEntry(rmode_));
