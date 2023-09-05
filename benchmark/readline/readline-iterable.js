@@ -5,6 +5,7 @@ const { Readable } = require('stream');
 
 const bench = common.createBenchmark(main, {
   n: [1e1, 1e2, 1e3, 1e4, 1e5, 1e6],
+  type: ['old', 'new']
 });
 
 const loremIpsum = `Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed
@@ -32,7 +33,50 @@ function getLoremIpsumStream(repetitions) {
   return readable;
 }
 
-async function main({ n }) {
+function oldWay() {
+  const readable = new Readable({
+    objectMode: true,
+    read: () => {
+      this.resume();
+    },
+    destroy: (err, cb) => {
+      this.off('line', lineListener);
+      this.off('close', closeListener);
+      this.close();
+      cb(err);
+    },
+  });
+  const lineListener = (input) => {
+    if (!readable.push(input)) {
+      // TODO(rexagod): drain to resume flow
+      this.pause();
+    }
+  };
+  const closeListener = () => {
+    readable.push(null);
+  };
+  const errorListener = (err) => {
+    readable.destroy(err);
+  };
+  this.on('error', errorListener);
+  this.on('line', lineListener);
+  this.on('close', closeListener);
+  return readable[Symbol.asyncIterator]();
+}
+
+async function readlineOldWay(n) {
+  bench.start();
+  const rlOldWay = readline.createInterface({
+    input: getLoremIpsumStream(n),
+  });
+  let totalCharsOldWay = 0
+  for await (const line of oldWay.call(rlOldWay)) {
+    totalCharsOldWay += line.length;
+  }
+  bench.end(totalCharsOldWay);
+}
+
+async function readlineNewWay(n) {
   bench.start();
   let lineCount = 0;
 
@@ -45,4 +89,18 @@ async function main({ n }) {
     lineCount++;
   }
   bench.end(lineCount);
+}
+
+async function main({ n, type }) {
+  switch (type) {
+    case 'old':
+      readlineOldWay(n);
+      break;
+    case 'new':
+      readlineNewWay(n);
+      break;
+    default:
+      throw new Error(`Unknown type ${type}`);
+  }
+
 }
